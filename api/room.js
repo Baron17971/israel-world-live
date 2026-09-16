@@ -1,2 +1,244 @@
-import{getCache}from'@vercel/functions';import crypto from'node:crypto';const TTL=36000,NS='israel-world-v2',SH=24,L={1:7,2:2,3:7,4:4};const c=()=>getCache(undefined,NS),rk=x=>`r:${x}`,aid=r=>r.activeStage===2?`g${r.gameIndex}`:`s${r.activeStage}`,clean=(v,n=120)=>typeof v==='string'?v.trim().slice(0,n):'',code=()=>String(crypto.randomInt(100000,1000000));function h(s){let x=2166136261;for(const ch of s){x^=ch.charCodeAt(0);x=Math.imul(x,16777619)}return x>>>0}const vk=(r,v)=>`v:${r.code}:${aid(r)}:${h(v)%SH}`,sk=(r,i)=>`v:${r.code}:${aid(r)}:${i}`;function eq(a,b){if(!a||!b)return false;const A=Buffer.from(String(a)),B=Buffer.from(String(b));return A.length===B.length&&crypto.timingSafeEqual(A,B)}async function body(req){if(req.body&&typeof req.body==='object')return req.body;const a=[];for await(const x of req)a.push(x);try{return JSON.parse(Buffer.concat(a).toString())}catch{return{}}}const pub=r=>({code:r.code,className:r.className,activeStage:r.activeStage,status:r.status,resultsVisible:r.resultsVisible,gameIndex:r.gameIndex,gameRevealed:r.gameRevealed,version:r.version});async function room(x){return c().get(rk(x))}async function save(r){await c().set(rk(r.code),r,{ttl:TTL})}function valid(r,a){if(r.activeStage===3){if(!Array.isArray(a))return null;const z=[...new Set(a.map(Number))].filter(n=>Number.isInteger(n)&&n>=0&&n<7).slice(0,3);return z.length?z:null}const n=Number(a);return Number.isInteger(n)&&n>=0&&n<L[r.activeStage]?n:null}async function mine(r,v){if(!v)return null;const b=await c().get(vk(r,v))||{};return Object.prototype.hasOwnProperty.call(b,v)?b[v]:null}async function agg(r){const bs=await Promise.all(Array.from({length:SH},(_,i)=>c().get(sk(r,i))));const counts=Array(L[r.activeStage]).fill(0);let total=0;for(const b of bs)if(b)for(const a of Object.values(b)){if(r.activeStage===3&&Array.isArray(a)){total++;for(const i of a)if(i>=0&&i<counts.length)counts[i]++}else if(Number.isInteger(a)&&a>=0&&a<counts.length){counts[a]++;total++}}return{counts,total}}async function reset(r){await Promise.all(Array.from({length:SH},(_,i)=>c().delete(sk(r,i))))}
-export default async function(req,res){res.setHeader('Cache-Control','no-store');try{if(req.method==='GET'){const q=clean(req.query?.code,10),v=clean(req.query?.voterId),t=clean(req.query?.teacherToken);if(!q)return res.status(400).json({error:'missing_code'});const r=await room(q);if(!r)return res.status(404).json({error:'room_not_found'});const teacher=eq(t,r.teacherToken),myVote=await mine(r,v),results=(teacher||r.resultsVisible||r.gameRevealed)?await agg(r):null;return res.json({...pub(r),myVote,results,teacher})}if(req.method!=='POST')return res.status(405).json({error:'method'});const b=await body(req),a=clean(b.action,30);if(a==='create'){let q='';for(let i=0;i<8;i++){const x=code();if(!await room(x)){q=x;break}}if(!q)return res.status(503).json({error:'code'});const now=Date.now(),r={code:q,teacherToken:crypto.randomBytes(24).toString('hex'),className:clean(b.className,60),activeStage:1,status:'closed',resultsVisible:false,gameIndex:0,gameRevealed:false,version:1,createdAt:now,updatedAt:now};await save(r);return res.status(201).json({...pub(r),teacherToken:r.teacherToken,results:{counts:Array(7).fill(0),total:0}})}const q=clean(b.code,10),r=await room(q);if(!r)return res.status(404).json({error:'room_not_found'});if(a==='vote'){if(r.status!=='open'||r.gameRevealed)return res.status(409).json({error:'poll_closed'});const v=clean(b.voterId),ans=valid(r,b.answer);if(!v||ans===null)return res.status(400).json({error:'bad_vote'});const key=vk(r,v);for(let n=0;n<5;n++){const x=await c().get(key)||{};await c().set(key,{...x,[v]:ans},{ttl:TTL});const y=await c().get(key)||{};if(JSON.stringify(y[v])===JSON.stringify(ans))return res.json({ok:true,myVote:ans});await new Promise(z=>setTimeout(z,30+n*20))}return res.status(409).json({error:'vote_retry'})}if(!eq(clean(b.teacherToken),r.teacherToken))return res.status(403).json({error:'teacher_auth_failed'});const touch=()=>{r.version++;r.updatedAt=Date.now()};if(a==='setStage'){r.activeStage=Number(b.stage);r.status='open';r.resultsVisible=false;if(r.activeStage===2){r.gameIndex=0;r.gameRevealed=false}}else if(a==='setStatus')r.status=b.status==='open'?'open':'closed';else if(a==='setVisibility')r.resultsVisible=!!b.resultsVisible;else if(a==='reset')await reset(r);else if(a==='gameReveal'){r.gameRevealed=true;r.status='closed';r.resultsVisible=true}else if(a==='gameNext'){r.gameIndex=Math.min(9,r.gameIndex+1);r.gameRevealed=false;r.status='closed';r.resultsVisible=false}else if(a==='gamePrev'){r.gameIndex=Math.max(0,r.gameIndex-1);r.gameRevealed=false;r.status='closed';r.resultsVisible=false}else return res.status(400).json({error:'action'});touch();await save(r);return res.json({...pub(r),results:await agg(r),teacher:true})}catch(e){console.error(e);res.status(500).json({error:'server_error'})}}
+import { getCache } from '@vercel/functions';
+import crypto from 'node:crypto';
+
+const TTL = 36000;
+const NS = 'israel-world-v2';
+const SHARDS = 24;
+const OPTION_COUNT = { 1: 7, 2: 2, 3: 7, 4: 4 };
+
+const cache = () => getCache(undefined, NS);
+const roomKey = (code) => `r:${code}`;
+const activityId = (room) => room.activeStage === 2 ? `g${room.gameIndex}` : `s${room.activeStage}`;
+const clean = (value, max = 120) => typeof value === 'string' ? value.trim().slice(0, max) : '';
+const newCode = () => String(crypto.randomInt(100000, 1000000));
+
+function hash(value) {
+  let result = 2166136261;
+  for (const char of value) {
+    result ^= char.charCodeAt(0);
+    result = Math.imul(result, 16777619);
+  }
+  return result >>> 0;
+}
+
+const voterKey = (room, voterId) => `v:${room.code}:${activityId(room)}:${hash(voterId) % SHARDS}`;
+const shardKey = (room, index) => `v:${room.code}:${activityId(room)}:${index}`;
+
+function sameToken(a, b) {
+  if (!a || !b) return false;
+  const aa = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
+}
+
+async function readBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString());
+  } catch {
+    return {};
+  }
+}
+
+function publicRoom(room) {
+  return {
+    code: room.code,
+    className: room.className,
+    activeStage: room.activeStage,
+    status: room.status,
+    resultsVisible: room.resultsVisible,
+    gameIndex: room.gameIndex,
+    gameRevealed: room.gameRevealed,
+    version: room.version,
+  };
+}
+
+async function getRoom(code) {
+  return cache().get(roomKey(code));
+}
+
+async function saveRoom(room) {
+  await cache().set(roomKey(room.code), room, { ttl: TTL });
+}
+
+function validateAnswer(room, answer) {
+  if (room.activeStage === 3) {
+    if (!Array.isArray(answer)) return null;
+    const values = [...new Set(answer.map(Number))]
+      .filter((n) => Number.isInteger(n) && n >= 0 && n < 7)
+      .slice(0, 3);
+    return values.length ? values : null;
+  }
+  const n = Number(answer);
+  return Number.isInteger(n) && n >= 0 && n < OPTION_COUNT[room.activeStage] ? n : null;
+}
+
+async function myVote(room, voterId) {
+  if (!voterId) return null;
+  const bucket = await cache().get(voterKey(room, voterId)) || {};
+  return Object.prototype.hasOwnProperty.call(bucket, voterId) ? bucket[voterId] : null;
+}
+
+async function aggregate(room) {
+  const buckets = await Promise.all(
+    Array.from({ length: SHARDS }, (_, i) => cache().get(shardKey(room, i)))
+  );
+  const counts = Array(OPTION_COUNT[room.activeStage]).fill(0);
+  let total = 0;
+  for (const bucket of buckets) {
+    if (!bucket) continue;
+    for (const answer of Object.values(bucket)) {
+      if (room.activeStage === 3 && Array.isArray(answer)) {
+        total += 1;
+        for (const i of answer) if (i >= 0 && i < counts.length) counts[i] += 1;
+      } else if (Number.isInteger(answer) && answer >= 0 && answer < counts.length) {
+        counts[answer] += 1;
+        total += 1;
+      }
+    }
+  }
+  return { counts, total };
+}
+
+async function resetVotes(room) {
+  await Promise.all(
+    Array.from({ length: SHARDS }, (_, i) => cache().delete(shardKey(room, i)))
+  );
+}
+
+export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+
+  try {
+    if (req.method === 'GET') {
+      const code = clean(req.query?.code, 10);
+      const voterId = clean(req.query?.voterId);
+      const teacherToken = clean(req.query?.teacherToken);
+      if (!code) return res.status(400).json({ error: 'missing_code' });
+
+      const room = await getRoom(code);
+      if (!room) return res.status(404).json({ error: 'room_not_found' });
+
+      const teacher = sameToken(teacherToken, room.teacherToken);
+      const vote = await myVote(room, voterId);
+      const results = (teacher || room.resultsVisible || room.gameRevealed) ? await aggregate(room) : null;
+      return res.json({ ...publicRoom(room), myVote: vote, results, teacher });
+    }
+
+    if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
+
+    const body = await readBody(req);
+    const action = clean(body.action, 30);
+
+    if (action === 'create') {
+      let code = '';
+      for (let i = 0; i < 8; i += 1) {
+        const candidate = newCode();
+        if (!await getRoom(candidate)) {
+          code = candidate;
+          break;
+        }
+      }
+      if (!code) return res.status(503).json({ error: 'code' });
+
+      const now = Date.now();
+      const room = {
+        code,
+        teacherToken: crypto.randomBytes(24).toString('hex'),
+        className: clean(body.className, 60),
+        activeStage: 1,
+        status: 'closed',
+        resultsVisible: false,
+        gameIndex: 0,
+        gameRevealed: false,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await saveRoom(room);
+      return res.status(201).json({
+        ...publicRoom(room),
+        teacherToken: room.teacherToken,
+        results: { counts: Array(7).fill(0), total: 0 },
+      });
+    }
+
+    const code = clean(body.code, 10);
+    const room = await getRoom(code);
+    if (!room) return res.status(404).json({ error: 'room_not_found' });
+
+    if (action === 'vote') {
+      if (room.status !== 'open' || room.gameRevealed) {
+        return res.status(409).json({ error: 'poll_closed' });
+      }
+      const voterId = clean(body.voterId);
+      const answer = validateAnswer(room, body.answer);
+      if (!voterId || answer === null) return res.status(400).json({ error: 'bad_vote' });
+
+      const key = voterKey(room, voterId);
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const current = await cache().get(key) || {};
+        await cache().set(key, { ...current, [voterId]: answer }, { ttl: TTL });
+        const verify = await cache().get(key) || {};
+        if (JSON.stringify(verify[voterId]) === JSON.stringify(answer)) {
+          return res.json({ ok: true, myVote: answer });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 30 + attempt * 20));
+      }
+      return res.status(409).json({ error: 'vote_retry' });
+    }
+
+    if (!sameToken(clean(body.teacherToken), room.teacherToken)) {
+      return res.status(403).json({ error: 'teacher_auth_failed' });
+    }
+
+    const touch = () => {
+      room.version += 1;
+      room.updatedAt = Date.now();
+    };
+
+    if (action === 'setStage') {
+      const nextStage = Number(body.stage);
+      if (!Number.isInteger(nextStage) || nextStage < 1 || nextStage > 4) {
+        return res.status(400).json({ error: 'bad_stage' });
+      }
+      room.activeStage = nextStage;
+      room.status = 'open';
+      room.resultsVisible = false;
+      // Important: a reveal from stage 2 must never leak into stages 3–4.
+      room.gameRevealed = false;
+      if (room.activeStage === 2) room.gameIndex = 0;
+    } else if (action === 'setStatus') {
+      room.status = body.status === 'open' ? 'open' : 'closed';
+    } else if (action === 'setVisibility') {
+      room.resultsVisible = Boolean(body.resultsVisible);
+    } else if (action === 'reset') {
+      await resetVotes(room);
+    } else if (action === 'gameReveal') {
+      room.gameRevealed = true;
+      room.status = 'closed';
+      room.resultsVisible = true;
+    } else if (action === 'gameNext') {
+      room.gameIndex = Math.min(9, room.gameIndex + 1);
+      room.gameRevealed = false;
+      room.status = 'closed';
+      room.resultsVisible = false;
+    } else if (action === 'gamePrev') {
+      room.gameIndex = Math.max(0, room.gameIndex - 1);
+      room.gameRevealed = false;
+      room.status = 'closed';
+      room.resultsVisible = false;
+    } else {
+      return res.status(400).json({ error: 'action' });
+    }
+
+    touch();
+    await saveRoom(room);
+    return res.json({ ...publicRoom(room), results: await aggregate(room), teacher: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'server_error' });
+  }
+}
