@@ -1,0 +1,1 @@
+להחלפת תמונת הכותרת: העלו לתיקייה public קובץ בשם lesson-header.jpg ובחרו Replace/Commit changes. אין צורך לשנות קוד.
