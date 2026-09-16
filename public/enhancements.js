@@ -54,6 +54,8 @@
     }
   };
 
+  var stage3VoteSaved = false;
+
   function enhanceReveal() {
     var reveal = document.querySelector('.reveal');
     var titleEl = document.querySelector('.game h3');
@@ -84,10 +86,87 @@
     }
   }
 
+  function showSavedToast() {
+    var toastBox = document.getElementById('toast');
+    if (!toastBox) return;
+    toastBox.textContent = '✓ הבחירה נקלטה';
+    toastBox.classList.add('show');
+    window.setTimeout(function () { toastBox.classList.remove('show'); }, 1800);
+  }
+
+  function enhanceStage3Feedback() {
+    var send = document.getElementById('sendMulti');
+    if (!send) return;
+
+    var selected = document.querySelectorAll('.vote[data-answer].sel');
+    if (!selected.length) stage3VoteSaved = false;
+
+    var feedback = document.getElementById('stage3SavedFeedback');
+    if (stage3VoteSaved) {
+      send.textContent = 'עדכון הבחירה';
+      if (!feedback) {
+        feedback = document.createElement('div');
+        feedback.id = 'stage3SavedFeedback';
+        feedback.className = 'confirm';
+        feedback.textContent = '✓ הבחירה נקלטה';
+        var buttonsWrap = send.closest('.btns');
+        if (buttonsWrap) buttonsWrap.insertAdjacentElement('afterend', feedback);
+      }
+    } else {
+      send.textContent = 'שליחת הבחירה';
+      if (feedback && feedback.parentNode) feedback.parentNode.removeChild(feedback);
+    }
+
+    Array.prototype.forEach.call(document.querySelectorAll('.vote[data-answer]'), function (button) {
+      if (button.getAttribute('data-stage3-feedback-wired') === '1') return;
+      button.setAttribute('data-stage3-feedback-wired', '1');
+      button.addEventListener('click', function () {
+        stage3VoteSaved = false;
+        window.requestAnimationFrame(enhanceStage3Feedback);
+      });
+    });
+  }
+
+  function wrapStage3VoteFetch() {
+    if (window.__stage3VoteFeedbackWrapped || typeof window.fetch !== 'function') return;
+    window.__stage3VoteFeedbackWrapped = true;
+    var originalFetch = window.fetch;
+
+    window.fetch = function (input, init) {
+      var isStage3Vote = false;
+      try {
+        var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+        var method = init && init.method ? String(init.method).toUpperCase() : 'GET';
+        if (url.indexOf('/api/room') >= 0 && method === 'POST' && init && typeof init.body === 'string') {
+          var payload = JSON.parse(init.body);
+          isStage3Vote = payload && payload.action === 'vote' && Array.isArray(payload.answer);
+        }
+      } catch (e) {}
+
+      var request = originalFetch.apply(window, arguments);
+      if (!isStage3Vote) return request;
+
+      return request.then(function (response) {
+        stage3VoteSaved = !!response.ok;
+        if (response.ok) {
+          showSavedToast();
+          window.requestAnimationFrame(enhanceStage3Feedback);
+        }
+        return response;
+      }, function (error) {
+        stage3VoteSaved = false;
+        throw error;
+      });
+    };
+  }
+
   function enhance() {
     enhanceReveal();
     makeStatusClear();
+    enhanceStage3Feedback();
   }
+
+  wrapStage3VoteFetch();
 
   var observer = new MutationObserver(function () {
     window.requestAnimationFrame(enhance);
