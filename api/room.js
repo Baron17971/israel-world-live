@@ -1,7 +1,7 @@
 import { getCache } from '@vercel/functions';
 import crypto from 'node:crypto';
 
-const TTL = 36000;
+const TTL = 2592000;
 const NS = 'israel-world-v2';
 const SHARDS = 24;
 const OPTION_COUNT = { 1: 7, 2: 2, 3: 7, 4: 4 };
@@ -52,6 +52,7 @@ function publicRoom(room) {
     gameIndex: room.gameIndex,
     gameRevealed: room.gameRevealed,
     version: room.version,
+    lastActiveAt: room.lastActiveAt || room.updatedAt || room.createdAt,
   };
 }
 
@@ -156,6 +157,7 @@ export default async function handler(req, res) {
         version: 1,
         createdAt: now,
         updatedAt: now,
+        lastActiveAt: now,
       };
       await saveRoom(room);
       return res.status(201).json({
@@ -183,6 +185,7 @@ export default async function handler(req, res) {
         await cache().set(key, { ...current, [voterId]: answer }, { ttl: TTL });
         const verify = await cache().get(key) || {};
         if (JSON.stringify(verify[voterId]) === JSON.stringify(answer)) {
+          room.lastActiveAt=Date.now();room.updatedAt=room.lastActiveAt;await saveRoom(room);
           return res.json({ ok: true, myVote: answer });
         }
         await new Promise((resolve) => setTimeout(resolve, 30 + attempt * 20));
@@ -197,6 +200,7 @@ export default async function handler(req, res) {
     const touch = () => {
       room.version += 1;
       room.updatedAt = Date.now();
+      room.lastActiveAt = room.updatedAt;
     };
 
     if (action === 'setStage') {
@@ -207,7 +211,6 @@ export default async function handler(req, res) {
       room.activeStage = nextStage;
       room.status = 'open';
       room.resultsVisible = false;
-      // Important: a reveal from stage 2 must never leak into stages 3–4.
       room.gameRevealed = false;
       if (room.activeStage === 2) room.gameIndex = 0;
     } else if (action === 'setStatus') {
