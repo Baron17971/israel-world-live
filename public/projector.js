@@ -5,7 +5,7 @@ function getToken(){var t=p.get('token')||'';try{t=t||localStorage.getItem('iwt-
 var token=getToken();
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
 function joinUrl(){return location.origin+'/join?code='+encodeURIComponent(code);}
-function projectorUrl(){return location.origin+'/teacher?code='+encodeURIComponent(code)+'&token='+encodeURIComponent(token)+'&projector=1';}
+function projectorUrl(){return location.origin+'/teacher?code='+encodeURIComponent(code)+'&projector=1';}
 function inject(){if(p.get('projector')==='1'||!code||!token||document.getElementById('projectorLaunch'))return;var strip=document.querySelector('.stages');if(!strip)return;var row=document.createElement('div');row.className='projector-launch-row';row.innerHTML='<button id="projectorLaunch" class="projector-launch" type="button">▣ תצוגת מקרן לכיתה</button>';strip.after(row);document.getElementById('projectorLaunch').onclick=function(){window.open(projectorUrl(),'_blank','noopener');};}
 if(p.get('projector')!=='1'){inject();new MutationObserver(inject).observe(document.getElementById('app'),{childList:true,subtree:true});return;}
 document.body.classList.add('projector-mode');var root=document.createElement('main');root.id='projectorRoot';document.body.appendChild(root);
