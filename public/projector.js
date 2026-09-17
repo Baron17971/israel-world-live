@@ -1,0 +1,39 @@
+(function(){
+'use strict';
+var p=new URLSearchParams(location.search);if(location.pathname!=='/teacher')return;var code=p.get('code')||'';
+function getToken(){var t=p.get('token')||'';try{t=t||localStorage.getItem('iwt-'+code)||'';}catch(e){}return t;}
+var token=getToken();
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
+function joinUrl(){return location.origin+'/join?code='+encodeURIComponent(code);}
+function projectorUrl(){return location.origin+'/teacher?code='+encodeURIComponent(code)+'&token='+encodeURIComponent(token)+'&projector=1';}
+function inject(){if(p.get('projector')==='1'||!code||!token||document.getElementById('projectorLaunch'))return;var strip=document.querySelector('.stages');if(!strip)return;var row=document.createElement('div');row.className='projector-launch-row';row.innerHTML='<button id="projectorLaunch" class="projector-launch" type="button">▣ תצוגת מקרן לכיתה</button>';strip.after(row);document.getElementById('projectorLaunch').onclick=function(){window.open(projectorUrl(),'_blank','noopener');};}
+if(p.get('projector')!=='1'){inject();new MutationObserver(inject).observe(document.getElementById('app'),{childList:true,subtree:true});return;}
+document.body.classList.add('projector-mode');var root=document.createElement('main');root.id='projectorRoot';document.body.appendChild(root);
+var stages={
+1:{title:'סקר פתיחה',sub:'מה בונה הצלחה?',question:'מה חשוב ביותר להצלחה יוצאת דופן?',options:['כישרון','התמדה','הזדמנות','ידע','אומץ','סקרנות','אנשים נכונים סביבי']},
+2:{title:'ישראלי – מי יודע?',sub:'פיתוח ישראלי או לא?'},
+3:{title:'מה הופך את ישראל לאומת סטארט־אפ?',sub:'מה בנה את האקוסיסטם?',question:'מה לדעתכם הופך את ישראל לאומת סטארט־אפ?',options:['חינוך ו־STEM','צורך ומחסור','מחקר ואקדמיה','תרבות של יוזמה','חיבור בין מערכות ואנשים','השקעה ומשאבים','חשיבה גלובלית']},
+4:{title:'ומה איתי?',sub:'האם פריצת הדרך הבאה כאן?',question:'מה הסיכוי שבעוד 10–20 שנה מישהו שיושב עכשיו בכיתה הזאת יהיה האדם שמאחורי פריצת הדרך הבאה?',options:['גבוה מאוד','בהחלט אפשרי','אולי','קשה לי לדמיין']}
+};
+var game=[
+['השקיה בטפטוף','💧','ישראלי','רעיון ההשקיה המדויקת התפתח בישראל ושינה חקלאות בארץ ובעולם.'],
+['QR Code','▦','לא ישראלי','קוד QR פותח ביפן בשנות ה־90.'],
+['PillCam','◉','ישראלי','מצלמת הקפסולה פותחה בישראל בחברת Given Imaging.'],
+['Bluetooth','ᛒ','לא ישראלי','Bluetooth צמח מפיתוח של Ericsson בשוודיה.'],
+['Mobileye','◉','ישראלי','Mobileye נוסדה בירושלים ופיתחה מערכות ראייה ממוחשבת לנהיגה.'],
+['Post-it','▰','לא ישראלי','פתקיות Post-it פותחו בחברת 3M בארצות הברית.'],
+['כיפת ברזל','⌁','ישראלי','המערכת פותחה בישראל בשיתוף תעשיות וגופי ביטחון.'],
+['GPS','⌖','לא ישראלי','GPS פותחה בארצות הברית כמערכת ניווט לוויינית.'],
+['Check Point / Firewall-1','◇','ישראלי','Check Point נוסדה בישראל ופיתחה טכנולוגיות אבטחת מידע.'],
+['בראשית','☾','ישראלי','משימת חלל ישראלית של SpaceIL והתעשייה האווירית שהגיעה לירח ב־2019.']
+];
+async function getRoom(){var r=await fetch('/api/room?code='+encodeURIComponent(code)+'&teacherToken='+encodeURIComponent(token),{cache:'no-store'});if(!r.ok)throw new Error('room');return r.json();}
+function header(room,title,sub){return '<div class="projector-head"><div><div class="projector-kicker">ישראל משנה את העולם'+(room.className?' · '+esc(room.className):'')+'</div><h1>'+esc(title)+'</h1><div class="projector-sub">'+esc(sub)+'</div></div><div class="projector-code"><img alt="QR" src="/api/qr?text='+encodeURIComponent(joinUrl())+'"><div><small>קוד כיתה</small><strong>'+esc(code)+'</strong></div></div></div>';}
+function bars(room,labels,allowMulti){var rr=room.results||{counts:[],total:0},total=rr.total||0;if(!room.resultsVisible)return '<div class="projector-wait"><strong>'+total+'</strong><span>תלמידים כבר הצביעו</span><small>התוצאות ייחשפו על ידי המורה</small></div>';return '<div class="projector-bars">'+labels.map(function(x,i){var n=(rr.counts&&rr.counts[i])||0,pct=total?Math.round(n*100/total):0;return '<div class="projector-bar"><div class="projector-bar-label"><b>'+esc(x)+'</b><strong>'+pct+'%</strong></div><div class="projector-track"><div style="width:'+Math.min(100,pct)+'%"></div></div><small>'+n+(allowMulti?' בחירות':' הצבעות')+'</small></div>';}).join('')+'</div><div class="projector-total">'+total+' משתתפים'+(allowMulti?' · ניתן לבחור עד 3 תשובות':'')+'</div>';}
+function pollContent(room){var s=stages[room.activeStage];return '<div class="projector-stage"><div class="projector-question">'+esc(s.question)+'</div>'+bars(room,s.options,room.activeStage===3)+'</div>';}
+function gameContent(room){var item=game[Math.max(0,Math.min(game.length-1,room.gameIndex||0))],rr=room.results||{counts:[0,0],total:0},total=rr.total||0;var vote='';if(room.gameRevealed){var yes=(rr.counts&&rr.counts[0])||0,no=(rr.counts&&rr.counts[1])||0,py=total?Math.round(yes*100/total):0,pn=total?Math.round(no*100/total):0;vote='<div class="projector-mini-results"><div><span>ישראלי</span><strong>'+py+'%</strong></div><div><span>לא ישראלי</span><strong>'+pn+'%</strong></div></div><div class="projector-reveal"><b>'+esc(item[2])+'</b><p>'+esc(item[3])+'</p></div>';}else{vote='<div class="projector-wait compact"><strong>'+total+'</strong><span>תלמידים כבר הצביעו</span><small>התשובה תיחשף על ידי המורה</small></div>';}
+return '<div class="projector-game-card"><div class="projector-game-step">פריט '+((room.gameIndex||0)+1)+' מתוך 10</div><div class="projector-game-icon">'+esc(item[1])+'</div><h2>'+esc(item[0])+'</h2><div class="projector-game-question">ישראלי או לא ישראלי?</div>'+vote+'</div>';}
+function content(room){return room.activeStage===2?gameContent(room):pollContent(room);}
+var last='';async function tick(){try{var room=await getRoom();if(!room.teacher)throw new Error('auth');var s=stages[room.activeStage]||stages[1];var html='<div class="projector-shell">'+header(room,s.title,s.sub)+'<div class="projector-toolbar"><span class="projector-status '+(room.status==='open'?'open':'')+'">'+(room.activeStage===2?(room.gameRevealed?'התשובה נחשפה':room.status==='open'?'ההצבעה פתוחה':'ממתינים לפתיחת ההצבעה'):room.status==='open'?'הפעילות פתוחה':'הפעילות סגורה')+'</span><span>שלב '+room.activeStage+' מתוך 4</span></div>'+content(room)+'</div>';if(html!==last){root.innerHTML=html;last=html;}}catch(e){root.innerHTML='<div class="projector-shell"><div class="projector-wait"><span>לא ניתן לטעון את תצוגת המקרן</span><small>פתחו אותה מחדש ממסך המורה.</small></div></div>';}}
+tick();setInterval(tick,1200);
+})();
